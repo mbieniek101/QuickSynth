@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>QuickSynth</title>
+<meta name="theme-color" content="#060509">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="QuickSynth">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preload" href="fonts/rajdhani-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- street layer: graffiti + edge data, purely decorative -->
+<div class="grime" aria-hidden="true">
+  <span class="tag t1">NO FUTURE</span>
+  <span class="tag t2">synth or die</span>
+  <span class="tag t3">07</span>
+  <span class="tag t4">x</span>
+</div>
+<div class="edge edge-l" aria-hidden="true">SYS.07 // ROOT ACCESS GRANTED // NO WARRANTY // AUD-CORE // UNLICENSED BUILD</div>
+<div class="edge edge-r live-col" aria-hidden="true"></div>
+
+<div id="app">
+  <header class="top">
+    <svg class="logo" viewBox="0 0 32 28" aria-hidden="true"><path d="M16 2 30 26H2Z" fill="none" stroke="currentColor" stroke-width="2"/><rect x="12" y="13" width="3" height="3"/><rect x="17" y="13" width="3" height="3"/><rect x="12" y="18" width="3" height="3"/><rect x="17" y="18" width="3" height="3" class="hot"/></svg>
+    <nav class="tabs" id="tabs"></nav>
+    <button id="bpmBtn" class="bpm" aria-label="Tempo and settings"><span id="bpmVal">124</span><small>BPM</small></button>
+    <button id="menuBtn" class="menu" aria-label="Menu"><b>≡</b><small>MENU</small></button>
+    <span class="micro hdr-serial" data-gen="serial" aria-hidden="true"></span>
+  </header>
+
+  <div class="wrap screen-wrap" id="screenWrap">
+    <div class="ptag-row" aria-hidden="true"><span class="ptag">AUD/CORE ▸ UNIT_07</span><span class="micro" data-gen="hexline"></span></div>
+    <section class="screen frame" id="screen">
+      <div class="screen-row">
+        <span id="scrDev" class="scr-strong">DRUM</span>
+        <span id="scrInfo">P01</span>
+        <span id="scrMode">PLAY</span>
+      </div>
+      <canvas id="matrix"></canvas>
+      <div class="screen-row">
+        <span id="scrSel" class="scr-strong">KICK</span>
+        <span id="scrMsg"></span>
+        <span class="micro live" id="scrClock">T+00:00</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap knobs-wrap">
+    <div class="ptag-row" aria-hidden="true"><span class="ptag cyan">MOD // PARAMS</span><span class="barcode" data-gen="barcode"></span><span class="micro" data-gen="coords"></span></div>
+    <section class="knobs frame" id="knobs"></section>
+  </div>
+
+  <section class="funcs">
+    <button class="fn" id="fnCtx">MUTE</button>
+    <button class="fn" id="fnWrite">WRITE</button>
+    <button class="fn" id="fnPattern">PATTERN</button>
+    <button class="fn" id="fnRec">REC</button>
+    <button class="fn play" id="playBtn" aria-label="Play">▶</button>
+  </section>
+
+  <section class="keys" id="keys"></section>
+  <section class="wgrid hidden" id="wgrid">
+    <div class="wsteps" id="wsteps"></div>
+    <div class="wnotes" id="wnotes"></div>
+  </section>
+
+  <div class="wrap fx-wrap">
+    <div class="ptag-row" aria-hidden="true"><span class="ptag yellow">FX // HOLD TO APPLY</span><span class="micro" data-gen="hexline"></span></div>
+    <section class="fxrow" id="fx"></section>
+  </div>
+</div>
+
+<div class="glitch-band" id="glitchBand" aria-hidden="true"></div>
+
+<div id="sheet" class="sheet hidden" aria-hidden="true">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <h2><span class="ptag">SYS.CFG</span> SETTINGS</h2>
+      <button class="close" id="sheetClose" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+</div>
+
+<div id="splash" class="splash">
+  <div class="boot">
+    <svg class="logo big" viewBox="0 0 32 28" aria-hidden="true"><path d="M16 2 30 26H2Z" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="12" y="13" width="3" height="3"/><rect x="17" y="13" width="3" height="3"/><rect x="12" y="18" width="3" height="3"/><rect x="17" y="18" width="3" height="3" class="hot"/></svg>
+    <div class="title" data-text="QUICKSYNTH">QUICKSYNTH</div>
+    <div class="micro sub" data-gen="serial" aria-hidden="true"></div>
+    <button class="jack" id="jackIn">TAP TO START</button>
+    <p class="hint" id="installHint"></p>
+  </div>
+</div>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+<script src="app.js"></script>
+</body>
+</html>
