@@ -1,5 +1,5 @@
 // Offline support: cache the app shell, serve from cache, refresh in the background.
-const CACHE = 'quicksynth-v8';
+const CACHE = 'quicksynth-v9';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
   'fonts/rajdhani-500.woff2', 'fonts/rajdhani-700.woff2'];

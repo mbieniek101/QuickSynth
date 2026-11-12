@@ -587,7 +587,7 @@ function scheduleStep(c, t) {
     }
   });
   const entry = { t, s, ps, c, pats: st.devices.map(d => d.cur) };
-  uiQueue.push(entry);
+  if (!document.hidden) uiQueue.push(entry); // nothing draws while hidden
   recent.push(entry); if (recent.length > 8) recent.shift();
 }
 
@@ -596,7 +596,10 @@ function swingOffset(c) { return (c % 2) ? st.swing * stepDur() * .66 : 0; }
 function scheduler() {
   if (!ctx) return;
   if (nextTime < ctx.currentTime - .2) nextTime = ctx.currentTime + .05; // after an interruption, don't catch up
-  while (nextTime < ctx.currentTime + .12) {
+  // in the background iOS throttles timers to about once a second, so schedule further ahead there;
+  // otherwise steps arrive late and the groove slows down and smears
+  const ahead = document.hidden ? 3 : .12;
+  while (nextTime < ctx.currentTime + ahead) {
     scheduleStep(counter, nextTime + swingOffset(counter));
     nextTime += stepDur();
     counter++;
@@ -1076,7 +1079,13 @@ function renderButtons() {
   els.fnPattern.classList.toggle('on', ui.mode === 'pattern');
   els.fnRec.classList.toggle('on', ui.rec);
   els.play.classList.toggle('on', ui.playing);
-  els.play.textContent = ui.playing ? '■' : '▶';
+  // drawn icons: the ▶ / ■ characters render as Apple's colour emoji on iPhone
+  const icon = ui.playing ? 'stop' : 'play';
+  if (els.play.dataset.icon !== icon) {
+    els.play.dataset.icon = icon;
+    els.play.innerHTML = ui.playing ? '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="4.5" width="11" height="11"/></svg>' : '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5v13l11-6.5z"/></svg>';
+    els.play.setAttribute('aria-label', ui.playing ? 'Stop' : 'Play');
+  }
   [...els.tabs.children].forEach((t, i) => {
     t.classList.toggle('active', i === ui.dev);
     t.classList.toggle('muted', st.devices[i].mute);
@@ -1343,7 +1352,10 @@ glitchSoon();
 document.addEventListener('touchmove', e => { if (!e.target.closest('.sheet-body')) e.preventDefault(); }, { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('touchend', resumeAudio, { passive: true });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeAudio(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (ui.playing) scheduler(); } // fill the buffer before timers get throttled
+  else { resumeAudio(); uiQueue = []; }
+});
 window.addEventListener('pagehide', () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch (e) {} });
 window.addEventListener('resize', () => { sizeMatrix(); drawMatrix(); if (!els.roll.classList.contains('hidden')) { sizeRoll(); drawRoll(); } });
 

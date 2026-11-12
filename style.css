@@ -36,6 +36,9 @@ html, body {
   -webkit-touch-callout: none;
   touch-action: manipulation;
 }
+html {
+  background-color: #060509;
+}
 body {
   background:
     /* scratches */
@@ -134,7 +137,8 @@ button {
   height: 100dvh;
   max-width: 500px;
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + 6px) 14px calc(env(safe-area-inset-bottom) + 8px);
+  /* bottom: only clear the home-indicator line, so the controls use the space Safari's URL bar had */
+  padding: calc(env(safe-area-inset-top) + 6px) 14px max(8px, calc(env(safe-area-inset-bottom) - 14px));
   transition: transform .05s;
 }
 #app.shift { transform: translateX(3px) skewX(-1deg); }
@@ -258,6 +262,7 @@ button {
 }
 .fn.play::after { border-color: #0b0408; left: auto; right: 3px; }
 .fn.play.on { background: var(--mag); color: #fff; }
+.fn.play .ico { width: 22px; height: 22px; fill: currentColor; display: block; margin: auto; }
 .fn:active { transform: translate(1px, 2px); }
 
 /* ---------- 4×4 keys: stolen HUD cells, no two quite alike ---------- */
