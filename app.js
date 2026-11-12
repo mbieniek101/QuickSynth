@@ -826,12 +826,20 @@ onPress(els.fnCtx, () => {
 });
 function setMode(m) {
   ui.mode = ui.mode === m ? 'play' : m;
+  if (ui.mode !== 'play') ui.rec = false; // recording only happens on the play pads
   ui.copyArmed = false; patHeld = []; patDown = 0; rollPtrs.clear();
   renderAll();
 }
 onPress(els.fnWrite, () => setMode('write'));
 onPress(els.fnPattern, () => setMode('pattern'));
-onPress(els.fnRec, () => { ui.rec = !ui.rec; renderAll(); });
+onPress(els.fnRec, () => {
+  ui.rec = !ui.rec;
+  if (ui.rec && ui.mode !== 'play') { // jump straight to the pads so you can record right away
+    ui.mode = 'play'; ui.copyArmed = false; patHeld = []; patDown = 0; rollPtrs.clear();
+  }
+  if (ui.rec && !ui.playing) flash('REC ARMED // PRESS ▶ AND PLAY THE PADS');
+  renderAll();
+});
 onPress(els.play, () => { initAudio(); ui.playing ? stop() : start(); });
 
 // --- 4×4 keys (play + pattern modes)

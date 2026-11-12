@@ -1,6 +1,6 @@
 // Offline support. Online: always load the newest files (network first, short timeout).
 // Offline or slow network: fall back to the cached copy. Bump CACHE when you change files.
-const CACHE = 'quicksynth-v12';
+const CACHE = 'quicksynth-v13';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
   'fonts/rajdhani-500.woff2', 'fonts/rajdhani-700.woff2'];
