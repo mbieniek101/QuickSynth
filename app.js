@@ -665,6 +665,7 @@ function start() {
   renderAll();
 }
 function stop() {
+  if (pendingReload) { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch (e) {} location.reload(); return; }
   ui.playing = false;
   clearInterval(timer);
   uiQueue = []; recent = [];
@@ -1030,22 +1031,48 @@ function drawRoll() {
   if (off > 0) g.fillText('▼', GUTTER - 10, H - 6);
 }
 
-// --- fx buttons
-FX.forEach(fx => {
+// --- fx buttons: hold to apply; slide a finger across the row to switch effects without lifting
+const fxBtns = FX.map(fx => {
   const b = document.createElement('button');
-  b.className = 'fxb'; b.textContent = fx.label;
-  onPress(b, () => {
-    initAudio();
-    activeFx.add(fx.id); b.classList.add('on');
-    if (fx.len) fxRepeatOrder.push(fx.id);
-    applyFx();
-  }, () => {
-    activeFx.delete(fx.id); b.classList.remove('on');
-    fxRepeatOrder = fxRepeatOrder.filter(id => id !== fx.id);
-    applyFx();
-  });
-  els.fx.appendChild(b);
+  b.className = 'fxb'; b.textContent = fx.label; b.dataset.fx = fx.id;
+  els.fx.appendChild(b); return b;
 });
+const fxFingers = new Map(); // pointerId -> fx id under that finger
+function fxHolders(id) { let n = 0; fxFingers.forEach(v => { if (v === id) n++; }); return n; }
+function fxOn(id) {
+  if (fxHolders(id) > 1) return; // another finger already holds it
+  initAudio();
+  activeFx.add(id); fxBtns.find(b => b.dataset.fx === id).classList.add('on');
+  if (FX.find(f => f.id === id).len) fxRepeatOrder.push(id);
+  applyFx();
+}
+function fxOff(id) {
+  if (!id || fxHolders(id) > 0) return;
+  activeFx.delete(id); fxBtns.find(b => b.dataset.fx === id).classList.remove('on');
+  fxRepeatOrder = fxRepeatOrder.filter(x => x !== id);
+  applyFx();
+}
+function fxAt(x, y) { const el = document.elementFromPoint(x, y); const b = el && el.closest('.fxb'); return b ? b.dataset.fx : null; }
+els.fx.addEventListener('pointerdown', e => {
+  const id = fxAt(e.clientX, e.clientY); if (!id) return;
+  e.preventDefault();
+  try { els.fx.setPointerCapture(e.pointerId); } catch (_) {}
+  fxFingers.set(e.pointerId, id); fxOn(id);
+});
+els.fx.addEventListener('pointermove', e => {
+  if (!fxFingers.has(e.pointerId)) return;
+  const prev = fxFingers.get(e.pointerId), id = fxAt(e.clientX, e.clientY);
+  if (id === prev) return;
+  if (id) { fxFingers.set(e.pointerId, id); fxOff(prev); fxOn(id); } // slid onto another effect
+  else { fxFingers.set(e.pointerId, null); fxOff(prev); }             // slid off the row: let go
+});
+function fxUp(e) {
+  if (!fxFingers.has(e.pointerId)) return;
+  const id = fxFingers.get(e.pointerId); fxFingers.delete(e.pointerId);
+  if (id) fxOff(id);
+}
+els.fx.addEventListener('pointerup', fxUp);
+els.fx.addEventListener('pointercancel', fxUp);
 
 // --- rendering
 function setCls(el, cls) { if (el.className !== cls) el.className = cls; }
@@ -1304,7 +1331,7 @@ function buildSheet() {
     <p><b>GUIDE</b> (write mode, bass/lead): lights up the notes of the suggested chord for this pattern. Pick a progression in the menu.</p>
     <p><b>PATTERN</b>: tap to switch (at end of bar while playing). Hold one and tap others to chain. <b>COPY</b>, then tap a slot, duplicates the current pattern.</p>
     <p><b>Demo patterns</b>: DRUM P1 techno · P2 house · P3 new wave · P4 tom fill. BASS P1 rolling · P2 octave pulse · P3 acid. Mix and match.</p>
-    <p><b>FX</b>: hold. LOW/HIGH sweep slowly while held (build-ups), PHAS = jet phaser, R×4/2/1 = beat repeat.</p>
+    <p><b>FX</b>: hold, and slide your finger along the row to switch effects. LOW/HIGH sweep slowly while held (build-ups), PHAS = jet phaser, R×4/2/1 = beat repeat.</p>
     <p><b>LEAD WAVE</b>: SAW, SQR, SUPER, TRI, FUZZ (distorted riff sound with a sub octave), TALK (talk-box robot voice). <b>DRIVE</b> adds grit without just getting louder. Try the Robot rock, Punk fifths and Talk box presets.</p>
     <p><b>LEAD CHORD</b> knob turns one key into octaves, fifths, triads or 7ths in key. GATE all the way up = <b>TIE</b> for pads.</p>
     <p><b>Knobs</b>: drag up/down, double-tap to reset. Tap the active tab to mute it.</p>`;
@@ -1425,7 +1452,18 @@ sizeMatrix();
 renderAll();
 requestAnimationFrame(frame);
 
+// updates: check for a new version whenever the app comes back to the front, and switch to it as soon
+// as it is installed (or right after you stop playing, so a jam never gets cut off)
+let pendingReload = false;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return; // first install, nothing to refresh
+    if (ui.playing) { pendingReload = true; flash('UPDATE READY // STOP TO LOAD'); }
+    else location.reload();
+  });
 }
 })();
