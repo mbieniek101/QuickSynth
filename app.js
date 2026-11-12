@@ -58,7 +58,7 @@ const DEFS = [
   { id: 'lead', name: 'LEAD', color: '#ff2bd6', selLabel: 'NOTE', knobs: [
     { k: 'wave', label: 'WAVE', def: w6(2), fmt: v => LEAD_WL[idx6(v)] },
     { k: 'cutoff', label: 'CUTOFF', def: .7 },
-    { k: 'attack', label: 'ATTACK', def: 0 },
+    { k: 'attack', label: 'ATTACK', def: 0, fmt: v => { const ms = 800 ** v; return ms < 1000 ? Math.round(ms) + 'MS' : (ms / 1000).toFixed(1) + 'S'; } },
     { k: 'release', label: 'RELEASE', def: .25 },
     { k: 'detune', label: 'DETUNE', def: .6 },
     { k: 'chord', label: 'CHORD', def: .7, fmt: v => CHORDS[chordIdx(v)] },
@@ -80,14 +80,14 @@ const PRESETS = {
     'Robot rock (fuzz riff)': { wave: w6(4), cutoff: .55, attack: 0, release: .18, detune: .25, chord: .3, gate: .55, drive: .85 },
     'Punk fifths': { wave: w6(4), cutoff: .62, attack: 0, release: .15, detune: .35, chord: .5, gate: .45, drive: 1 },
     'Gritty saw': { wave: w6(0), cutoff: .58, attack: 0, release: .22, detune: .35, chord: 0, gate: .6, drive: .7 },
-    'Talk box': { wave: w6(5), cutoff: .5, attack: .04, release: .25, detune: .2, chord: 0, gate: .75, drive: .45 },
-    'Talk box chords': { wave: w6(5), cutoff: .6, attack: .02, release: .3, detune: .25, chord: .7, gate: .5, drive: .35 },
+    'Talk box': { wave: w6(5), cutoff: .5, attack: .2, release: .25, detune: .2, chord: 0, gate: .75, drive: .45 },
+    'Talk box chords': { wave: w6(5), cutoff: .6, attack: .1, release: .3, detune: .25, chord: .7, gate: .5, drive: .35 },
     'Dirty stab': { wave: w6(2), cutoff: .6, attack: 0, release: .2, detune: .5, chord: .7, gate: .3, drive: .7 },
     'Square grit (chiptune punk)': { wave: w6(1), cutoff: .7, attack: 0, release: .12, detune: .08, chord: .3, gate: .4, drive: .6 },
     'Supersaw stab': { wave: w6(2), cutoff: .7, attack: 0, release: .25, detune: .6, chord: .7, gate: .35, drive: .15 },
     'Robot filter': { wave: w6(0), cutoff: .45, attack: 0, release: .2, detune: .2, chord: .3, gate: .5, drive: .2 },
-    'Goth pad': { wave: w6(2), cutoff: .42, attack: .55, release: .65, detune: .5, chord: .7, gate: 1, drive: 0 },
-    'Cold lead': { wave: w6(1), cutoff: .55, attack: .08, release: .4, detune: .3, chord: 0, gate: .7, drive: .1 },
+    'Goth pad': { wave: w6(2), cutoff: .42, attack: .9, release: .65, detune: .5, chord: .7, gate: 1, drive: 0 },
+    'Cold lead': { wave: w6(1), cutoff: .55, attack: .35, release: .4, detune: .3, chord: 0, gate: .7, drive: .1 },
     'Pluck': { wave: w6(0), cutoff: .5, attack: 0, release: .15, detune: .15, chord: .5, gate: .2, drive: .1 },
     'Organ chords': { wave: w6(1), cutoff: .6, attack: .02, release: .2, detune: .1, chord: .9, gate: .8, drive: 0 },
   },
@@ -458,8 +458,8 @@ function envAR(param, t, peak, att, dur, rel) {
     param.setTargetAtTime(0, t + dur, rel / 4);
   }
   return r => {
-    r = Math.max(r, t);
-    const v = r >= t + att ? peak : peak * (r - t) / att;
+    r = Math.max(r, t + att); // let the attack finish, so a quick tap still reaches full level
+    const v = peak;
     param.cancelScheduledValues(r); param.setValueAtTime(v, r); param.setTargetAtTime(0, r, rel / 4);
     return r + rel * 1.3 + .05;
   };
@@ -499,7 +499,9 @@ function bassVoice(midi, t, dur, p, bus) {
 const VOWEL_O = [450, 800, 2830], VOWEL_A = [800, 1150, 2900];
 function leadVoice(midi, t, dur, p, bus, nVoices = 1) {
   const f = mtof(midi), type = LEAD_WAVES[idx6(p.wave)];
-  const att = .002 + p.attack * p.attack * 1.5, rel = .03 + p.release * p.release * 2.5;
+  // ATTACK: 1 ms at 0, ~30 ms at half, ~0.8 s at max (exponential, so the whole knob range is usable)
+  const att = .001 * 800 ** p.attack, rel = .03 + p.release * p.release * 2.5;
+  if (dur != null) dur = Math.max(dur, att); // the fade-in always completes; short notes no longer vanish
   const g = ctx.createGain();
   // DRIVE: distortion after the filter, with level compensation so turning it up adds grit, not just volume
   const di = Math.round(p.drive * 5), fuzz = type === 'fuzz';
@@ -509,7 +511,7 @@ function leadVoice(midi, t, dur, p, bus, nVoices = 1) {
   if (dIdx > 0) { const sh = shaper(A.driveCurves[dIdx], g); sh.oversample = '2x'; pre.connect(sh); } else pre.connect(g);
   const post = pre;
   const fl = ctx.createBiquadFilter(); fl.type = 'lowpass';
-  const base = 200 * 2 ** (p.cutoff * 6.4), sweep = .2 + p.attack * .5;
+  const base = 200 * 2 ** (p.cutoff * 6.4), sweep = .2 + att;
   const oscs = [];
   const addOsc = (oscType, freq, cents, dest, lvl = 1) => {
     const o = ctx.createOscillator(); o.type = oscType; o.frequency.value = freq; o.detune.value = cents;
