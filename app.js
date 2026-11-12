@@ -21,6 +21,11 @@ const SCALES = {
   'blues': [0, 3, 5, 6, 7, 10],
   'chromatic': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
 };
+// chord guide: progressions as scale degrees (0 = root). Pattern 1 gets chord 1, pattern 2 chord 2, …
+const PROGS = [
+  { deg: [0, 5, 2, 6] }, { deg: [0, 6, 5, 6] }, { deg: [0, 3, 4, 0] }, { deg: [0, 5, 3, 4] },
+  { deg: [0, 2, 6, 5] }, { deg: [0, 3] }, { deg: [0, 5] }, { deg: [0] },
+];
 const BASS_WAVES = ['sawtooth', 'square', 'triangle', 'sine'], BASS_WL = ['SAW', 'SQR', 'TRI', 'SIN'];
 const LEAD_WAVES = ['sawtooth', 'square', 'super', 'triangle'], LEAD_WL = ['SAW', 'SQR', 'SUPER', 'TRI'];
 const CHORDS = ['OFF', 'OCT', '5TH', 'TRIAD', '7TH'];
@@ -93,12 +98,12 @@ const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
 
 function defaultState() {
   const s = {
-    v: 2, bpm: 124, swing: 0, pump: .45,
+    v: 2, bpm: 124, swing: 0, pump: .45, guide: { on: false, prog: 0 },
     devices: DEFS.map((d, i) => ({
       cur: 0, chain: [0], sel: 0,
       patterns: Array.from({ length: NPAT }, newPattern),
       params: i === 0 ? Array.from({ length: 16 }, () => defaults(d)) : defaults(d),
-      vol: .8, verb: [.12, 0, .28][i], mute: false, root: 2, scale: 'minor', oct: [3, 2, 4][i],
+      vol: [.8, .8, .9][i], verb: [.12, 0, .28][i], mute: false, root: 2, scale: 'minor', oct: [3, 2, 4][i],
     })),
   };
   const [dr, bs, ld] = s.devices;
@@ -137,6 +142,8 @@ function sanitize(s) {
   s.bpm = clamp(+s.bpm || 124, 40, 240);
   s.swing = clamp(+s.swing || 0, 0, .6);
   s.pump = s.pump === undefined ? .45 : clamp(+s.pump || 0, 0, 1);
+  if (!s.guide || typeof s.guide !== 'object') s.guide = { on: false, prog: 0 };
+  s.guide.on = !!s.guide.on; s.guide.prog = clamp(s.guide.prog | 0, 0, PROGS.length - 1);
   if (!s.rimFix) { const p1 = s.devices[0] && s.devices[0].patterns && s.devices[0].patterns[0]; if (p1 && p1.g && p1.g[11] === ((1 << 7) | (1 << 15))) p1.g[11] = 0; s.rimFix = 1; }
   s.devices.forEach((dev, i) => {
     const def = DEFS[i], base = d0.devices[i];
@@ -169,7 +176,7 @@ function save() {
 }
 
 // runtime (not saved)
-const rt = st.devices.map(() => ({ chainPos: 0, queued: null, cursor: 0 }));
+const rt = st.devices.map(() => ({ chainPos: 0, queued: null }));
 const ui = { dev: 0, mode: 'play', rec: false, playing: false, playStep: -1, copyArmed: false, clearArmedAt: 0 };
 
 const isSynth = di => di > 0;
@@ -182,6 +189,21 @@ function trackName(di, k) {
 }
 const stepOn = (pat, k, s) => (pat.g[k] >> s) & 1;
 const stepTracks = (pat, s) => range(0, 16).filter(k => stepOn(pat, k, s));
+// the chord the guide suggests for pattern `pi` of a synth: { pcs: [root, 3rd, 5th] pitch classes, name }
+function guideChord(dev, pi = dev.cur) {
+  if (!st.guide.on) return null;
+  const sc = SCALES[dev.scale], ps = sc.length === 7 ? sc : SCALES.minor; // 5/6/12-note scales borrow natural minor
+  const prog = PROGS[st.guide.prog].deg, d = prog[pi % prog.length];
+  const pcs = [0, 2, 4].map(j => (dev.root + ps[(d + j) % 7]) % 12);
+  const third = (pcs[1] - pcs[0] + 12) % 12, fifth = (pcs[2] - pcs[0] + 12) % 12;
+  const name = NOTE_NAMES[pcs[0]] + (third === 3 ? (fifth === 6 ? 'dim' : 'm') : (fifth === 8 ? 'aug' : ''));
+  return { pcs, name };
+}
+function progName(dev, prog) {
+  const save = st.guide; st.guide = { on: true, prog };
+  const names = PROGS[prog].deg.map((_, i) => guideChord(dev, i).name);
+  st.guide = save; return names.join(' – ');
+}
 function leadNotes(dev, k) {
   const base = noteFor(dev, k);
   switch (chordIdx(dev.params.chord)) {
@@ -254,7 +276,13 @@ function initAudio() {
     const b = ctx.createGain(); b.gain.value = dev.vol;
     const dk = ctx.createGain(); dk.gain.value = 1;
     const vs = ctx.createGain(); vs.gain.value = dev.verb;
-    b.connect(dk); dk.connect(input); dk.connect(vs); vs.connect(verb);
+    if (i === 2) { // LEAD: make room for the bass, add presence and density so it cuts through the mix
+      const lc = ctx.createBiquadFilter(); lc.type = 'highpass'; lc.frequency.value = 140; lc.Q.value = .5;
+      const pr = ctx.createBiquadFilter(); pr.type = 'peaking'; pr.frequency.value = 2600; pr.Q.value = .8; pr.gain.value = 4;
+      const sat = ctx.createWaveShaper(); sat.curve = makeCurve(x => Math.tanh(x * 1.6) / Math.tanh(1.6)); sat.oversample = '2x';
+      b.connect(lc); lc.connect(pr); pr.connect(sat); sat.connect(dk);
+    } else b.connect(dk);
+    dk.connect(input); dk.connect(vs); vs.connect(verb);
     buses.push(b); ducks.push(dk); verbSends.push(vs);
   });
 
@@ -281,9 +309,9 @@ function resumeAudio() { if (ctx && ctx.state !== 'running') ctx.resume().catch(
 // sidechain: duck bass + lead on every kick
 function pump(t) {
   const a = st.pump; if (!a || !A) return;
-  const depth = 1 - a * .85, back = stepDur() * .55;
+  const back = stepDur() * .55;
   for (const di of [1, 2]) {
-    const g = A.ducks[di].gain;
+    const g = A.ducks[di].gain, depth = 1 - a * (di === 2 ? .5 : .85); // lead ducks less so it stays audible
     g.cancelScheduledValues(t);
     g.setTargetAtTime(depth, t, .004);
     g.setTargetAtTime(1, t + .03, back);
@@ -470,7 +498,8 @@ function leadVoice(midi, t, dur, p, bus, nVoices = 1) {
     const o = ctx.createOscillator(); o.type = oscType; o.frequency.value = f; o.detune.value = c;
     o.connect(fl); o.start(t); return o;
   });
-  const peak = (oscType === 'triangle' ? .3 : .34 / oscs.length) / Math.sqrt(nVoices);
+  // detuned oscillators sum incoherently, so normalise by sqrt(n) rather than n (n made SUPER ~14 dB too quiet)
+  const peak = (oscType === 'triangle' ? .5 : .42 / Math.sqrt(oscs.length)) / Math.sqrt(nVoices);
   const release = envAR(g.gain, t, peak, att, dur, rel);
   const stopAll = end => { oscs.forEach(o => o.stop(end)); setTimeout(() => g.disconnect(), (end - ctx.currentTime + .2) * 1000); };
   if (dur != null) { stopAll(t + dur + rel * 1.3 + .05); return null; }
@@ -638,7 +667,7 @@ function recordHit(di, k) {
 // ---------------------------------------------------------------- UI
 const els = {
   tabs: $('#tabs'), knobs: $('#knobs'), keys: $('#keys'), wgrid: $('#wgrid'), wsteps: $('#wsteps'), wnotes: $('#wnotes'),
-  fx: $('#fx'), matrix: $('#matrix'),
+  fx: $('#fx'), matrix: $('#matrix'), roll: $('#roll'),
   scrDev: $('#scrDev'), scrInfo: $('#scrInfo'), scrMode: $('#scrMode'), scrSel: $('#scrSel'), scrMsg: $('#scrMsg'),
   fnCtx: $('#fnCtx'), fnWrite: $('#fnWrite'), fnPattern: $('#fnPattern'), fnRec: $('#fnRec'), play: $('#playBtn'),
   bpmVal: $('#bpmVal'), sheet: $('#sheet'), sheetBody: $('#sheetBody'),
@@ -730,17 +759,17 @@ function updateKnobs() {
 // --- function buttons
 // The first button changes with the mode: MUTE (play) · CLEAR or REST (write) · COPY (pattern)
 function ctxLabel() {
-  if (ui.mode === 'write') return isSynth(ui.dev) ? 'REST' : 'CLEAR';
+  if (ui.mode === 'write') return isSynth(ui.dev) ? 'GUIDE' : 'CLEAR';
   if (ui.mode === 'pattern') return 'COPY';
   return 'MUTE';
 }
 onPress(els.fnCtx, () => {
-  const dev = curDev(), r = rt[ui.dev];
+  const dev = curDev();
   if (ui.mode === 'play') toggleMute(ui.dev);
   else if (ui.mode === 'pattern') { ui.copyArmed = !ui.copyArmed; flash(ui.copyArmed ? `COPY P${pad2(dev.cur + 1)} → TAP SLOT` : ''); }
-  else if (isSynth(ui.dev)) { // REST: clear the step under the cursor, move on
-    const bit = 1 << r.cursor; curPat().g.forEach((_, k) => { curPat().g[k] &= ~bit; });
-    r.cursor = (r.cursor + 1) % STEPS; save();
+  else if (isSynth(ui.dev)) { // GUIDE: show/hide chord-tone hints
+    st.guide.on = !st.guide.on;
+    flash(st.guide.on ? `GUIDE ${progName(dev, st.guide.prog)}` : 'GUIDE OFF'); save();
   } else { // CLEAR the selected drum sound (tap twice)
     const now = performance.now();
     if (now - ui.clearArmedAt < 1500) { curPat().g[dev.sel] = 0; ui.clearArmedAt = 0; flash(`NUKED ${DRUM_NAMES[dev.sel]}`); save(); }
@@ -750,7 +779,7 @@ onPress(els.fnCtx, () => {
 });
 function setMode(m) {
   ui.mode = ui.mode === m ? 'play' : m;
-  ui.copyArmed = false; patHeld = []; patDown = 0; notesHeld.clear();
+  ui.copyArmed = false; patHeld = []; patDown = 0; rollPtrs.clear();
   renderAll();
 }
 onPress(els.fnWrite, () => setMode('write'));
@@ -802,13 +831,8 @@ function keyUp(k, pid) {
   save(); renderAll();
 }
 
-// --- write grid: 16 steps on top, 16 sounds/notes below (no view switching)
+// --- drum write grid: 16 steps on top, 16 sounds below
 const stepEls = [], noteEls = [];
-// synth note keys are laid out like a keyboard: low notes on the bottom row
-const noteTrackAt = i => isSynth(ui.dev) ? (i < 8 ? i + 8 : i - 8) : i;
-const notesHeld = new Set();
-let entryMade = false, lastStepTap = { s: -1, t: 0 };
-
 for (let s = 0; s < 16; s++) {
   const b = document.createElement('button');
   b.className = 'wkey step';
@@ -816,57 +840,148 @@ for (let s = 0; s < 16; s++) {
   onPress(b, () => { b.classList.add('down'); resumeAudio(); stepDown(s); }, () => b.classList.remove('down'));
   stepEls.push(b); els.wsteps.appendChild(b);
 }
-for (let i = 0; i < 16; i++) {
+for (let k = 0; k < 16; k++) {
   const b = document.createElement('button');
   b.className = 'wkey note';
   b.innerHTML = `<span class="lbl"></span>`;
-  onPress(b, e => { b.classList.add('down'); resumeAudio(); noteDown(noteTrackAt(i), e.pointerId); },
-             e => { b.classList.remove('down'); noteUp(e.pointerId); });
+  onPress(b, e => { b.classList.add('down'); resumeAudio(); noteDown(k, e.pointerId); },
+             e => { b.classList.remove('down'); releaseLive(e.pointerId); });
   noteEls.push(b); els.wnotes.appendChild(b);
 }
+function stepDown(s) { // toggle the selected sound on this step
+  const dev = curDev(), pat = curPat(), on = stepOn(pat, dev.sel, s);
+  pat.g[dev.sel] ^= 1 << s;
+  if (!on && !ui.playing) triggerLive(0, dev.sel, -1);
+  save(); renderAll();
+}
+function noteDown(k, pid) { // pick the sound (and hear it)
+  const dev = curDev(); dev.sel = k; triggerLive(0, k, pid); updateKnobs(); save(); renderAll();
+}
 
-function stepDown(s) {
-  const dev = curDev(), di = ui.dev, pat = curPat();
-  if (di === 0) { // drums: toggle the selected sound on this step
-    const on = stepOn(pat, dev.sel, s);
-    pat.g[dev.sel] ^= 1 << s;
-    if (!on && !ui.playing) triggerLive(0, dev.sel, -1);
-  } else { // synths: move the cursor here; double-tap clears the step
-    const r = rt[di], now = performance.now();
-    if (lastStepTap.s === s && now - lastStepTap.t < 320) {
-      pat.g.forEach((_, k) => { pat.g[k] &= ~(1 << s); });
-      flash(`STEP ${s + 1} WIPED`); lastStepTap.s = -1;
-    } else {
-      r.cursor = s; lastStepTap = { s, t: now };
-      if (!ui.playing) previewStep(di, s);
+// --- piano roll (bass + lead): steps left→right, notes low→high. Tap a cell to add/remove, drag to paint.
+const ROW_MIN = 27, GUTTER = 40;
+const rollOff = [null, null, null]; // lowest visible track per device (null = start near the pattern's notes)
+const rollPtrs = new Map();         // pointerId -> { kind: 'draw'|'erase'|'scroll', ... }
+let rollGeo = null;
+
+function sizeRoll() {
+  const c = els.roll, dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(c.clientWidth * dpr); c.height = Math.round(c.clientHeight * dpr);
+}
+function rollLayout() {
+  const c = els.roll, W = c.clientWidth, H = c.clientHeight;
+  const rows = clamp(Math.floor(H / ROW_MIN), 5, 16);
+  const di = ui.dev;
+  if (rollOff[di] == null) { const g = curPat().g, low = g.findIndex(x => x); rollOff[di] = low < 0 ? 0 : low - 1; }
+  rollOff[di] = clamp(rollOff[di], 0, 16 - rows);
+  return rollGeo = { W, H, rows, off: rollOff[di], cw: (W - GUTTER) / 16, rh: H / rows };
+}
+function rollCell(e) {
+  const r = els.roll.getBoundingClientRect(), g = rollGeo, x = e.clientX - r.left, y = e.clientY - r.top;
+  const row = clamp(Math.floor((g.H - y) / g.rh), 0, g.rows - 1);
+  return { gutter: x < GUTTER, s: clamp(Math.floor((x - GUTTER) / g.cw), 0, 15), k: g.off + row, y };
+}
+function setCell(s, k, on) {
+  const di = ui.dev, pat = curPat(), bit = 1 << s;
+  if (on && di === 1) pat.g.forEach((_, j) => { pat.g[j] &= ~bit; }); // bass is mono: one note per step
+  if (on) pat.g[k] |= bit; else pat.g[k] &= ~bit;
+}
+function audition(k) {
+  initAudio();
+  const di = ui.dev, dev = st.devices[di], t = ctx.currentTime + .005, bus = A.buses[di];
+  if (di === 1) { bassLastF = 0; bassVoice(noteFor(dev, k), t, .22, dev.params, bus); }
+  else leadChord(dev, k, t, .28, bus);
+}
+els.roll.addEventListener('pointerdown', e => {
+  e.preventDefault(); resumeAudio();
+  try { els.roll.setPointerCapture(e.pointerId); } catch (_) {}
+  rollLayout();
+  const c = rollCell(e);
+  if (c.gutter) { rollPtrs.set(e.pointerId, { kind: 'scroll', y0: c.y, off0: rollGeo.off, moved: false, k: c.k }); return; }
+  const kind = stepOn(curPat(), c.k, c.s) ? 'erase' : 'draw';
+  rollPtrs.set(e.pointerId, { kind, s: c.s, k: c.k });
+  setCell(c.s, c.k, kind === 'draw');
+  if (kind === 'draw' && (!ui.playing || ui.dev === 2)) audition(c.k);
+  save(); renderAll();
+});
+els.roll.addEventListener('pointermove', e => {
+  const p = rollPtrs.get(e.pointerId); if (!p) return;
+  const c = rollCell(e);
+  if (p.kind === 'scroll') {
+    const d = Math.round((c.y - p.y0) / rollGeo.rh); // drag down = see higher notes
+    if (d) p.moved = true;
+    const off = clamp(p.off0 + d, 0, 16 - rollGeo.rows);
+    if (off !== rollOff[ui.dev]) { rollOff[ui.dev] = off; rollLayout(); drawRoll(); }
+    return;
+  }
+  if (c.gutter || (c.s === p.s && c.k === p.k)) return;
+  const rowChanged = c.k !== p.k;
+  p.s = c.s; p.k = c.k;
+  const on = stepOn(curPat(), c.k, c.s);
+  if (p.kind === 'draw' && !on) { setCell(c.s, c.k, true); if (rowChanged && !ui.playing) audition(c.k); }
+  else if (p.kind === 'erase' && on) setCell(c.s, c.k, false);
+  else return;
+  save(); renderAll();
+});
+function rollUp(e) {
+  const p = rollPtrs.get(e.pointerId); rollPtrs.delete(e.pointerId);
+  if (p && p.kind === 'scroll' && !p.moved && e.type === 'pointerup') audition(p.k); // tap a label to hear it
+}
+els.roll.addEventListener('pointerup', rollUp);
+els.roll.addEventListener('pointercancel', rollUp);
+
+function drawRoll() {
+  const c = els.roll, g = c.getContext('2d'), dpr = window.devicePixelRatio || 1;
+  if (!c.width || !c.height) return;
+  const L = rollLayout(), { W, H, rows, off, cw, rh } = L;
+  const di = ui.dev, dev = curDev(), pat = curPat(), col = DEFS[di].color;
+  const sclen = SCALES[dev.scale].length, chord = guideChord(dev);
+  const tie = di === 2 && dev.params.gate > .92;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let r = 0; r < rows; r++) {
+    const k = off + r, y = H - (r + 1) * rh, pc = noteFor(dev, k) % 12;
+    const isRoot = k % sclen === 0, ci = chord ? chord.pcs.indexOf(pc) : -1;
+    // row background: chord tones get a soft tint when the guide is on, the key's root stays cyan
+    g.fillStyle = ci === 0 ? rgba(col, .2) : ci > 0 ? rgba(col, .1) : r % 2 ? 'rgba(255,255,255,.025)' : 'rgba(0,0,0,0)';
+    g.fillRect(GUTTER, y, W - GUTTER, rh);
+    g.fillStyle = isRoot ? 'rgba(94,246,255,.16)' : 'rgba(14,6,10,.8)';
+    g.fillRect(0, y + .5, GUTTER - 3, rh - 1);
+    if (ci >= 0) { g.fillStyle = col; g.fillRect(GUTTER - 3, y + 1, 3, rh - 2); }
+    g.fillStyle = isRoot ? '#5ef6ff' : ci >= 0 ? col : 'rgba(255,255,255,.7)';
+    g.font = `700 ${Math.min(13, rh * .45)}px Rajdhani, sans-serif`;
+    g.fillText(noteName(noteFor(dev, k)), (GUTTER - 3) / 2, y + rh / 2 + 1);
+    g.fillStyle = 'rgba(255,70,85,.18)'; g.fillRect(GUTTER, y, W - GUTTER, 1);
+  }
+  for (let s = 0; s <= 16; s++) { // beat lines
+    g.fillStyle = s % 4 === 0 ? 'rgba(243,230,0,.35)' : 'rgba(255,70,85,.14)';
+    g.fillRect(GUTTER + s * cw - (s === 16 ? 1 : 0), 0, s % 4 === 0 ? 1.5 : 1, H);
+  }
+  if (ui.playStep >= 0 && ui.playing) { g.fillStyle = 'rgba(255,255,255,.1)'; g.fillRect(GUTTER + ui.playStep * cw, 0, cw, H); }
+  // notes
+  g.shadowColor = col; g.shadowBlur = 6;
+  for (let r = 0; r < rows; r++) {
+    const k = off + r, y = H - (r + 1) * rh;
+    for (let s = 0; s < 16; s++) {
+      if (!stepOn(pat, k, s)) continue;
+      const joinR = tie && s < 15 && stepOn(pat, k, s + 1);
+      g.fillStyle = ui.playing && s === ui.playStep ? '#fff' : col;
+      g.fillRect(GUTTER + s * cw + 2, y + 3, cw - (joinR ? 0 : 4) + (joinR ? 2 : 0), rh - 6);
     }
   }
-  save(); renderAll();
-}
-
-function noteDown(k, pid) {
-  const dev = curDev(), di = ui.dev;
-  if (di === 0) { // drums: pick the sound (and hear it)
-    dev.sel = k; triggerLive(0, k, pid); updateKnobs(); save(); renderAll(); return;
+  g.shadowBlur = 0;
+  // notes outside the visible rows: little arrows on the edge
+  for (let s = 0; s < 16; s++) {
+    const ks = stepTracks(pat, s), x = GUTTER + s * cw + cw / 2;
+    g.fillStyle = col;
+    if (ks.some(k => k >= off + rows)) { g.beginPath(); g.moveTo(x - 4, 7); g.lineTo(x + 4, 7); g.lineTo(x, 2); g.fill(); }
+    if (ks.some(k => k < off)) { g.beginPath(); g.moveTo(x - 4, H - 7); g.lineTo(x + 4, H - 7); g.lineTo(x, H - 2); g.fill(); }
   }
-  // synths: write the note at the cursor. Hold one note and tap others for a chord (lead).
-  const r = rt[di], pat = curPat(), bit = 1 << r.cursor;
-  const chordAdd = di === 2 && notesHeld.size > 0;
-  if (!chordAdd) pat.g.forEach((_, j) => { pat.g[j] &= ~bit; });
-  pat.g[k] |= bit;
-  dev.sel = k;
-  notesHeld.add(pid); entryMade = true;
-  triggerLive(di, k, pid);
-  save(); renderAll();
-}
-function noteUp(pid) {
-  releaseLive(pid);
-  if (!notesHeld.delete(pid)) return;
-  if (notesHeld.size === 0 && entryMade) {
-    entryMade = false;
-    const r = rt[ui.dev]; r.cursor = (r.cursor + 1) % STEPS; // auto-advance like a step sequencer
-    renderAll();
-  }
+  // gutter scroll hints
+  g.fillStyle = 'rgba(255,255,255,.55)'; g.font = `700 9px Rajdhani, sans-serif`;
+  if (off + rows < 16) g.fillText('▲', GUTTER - 10, 6);
+  if (off > 0) g.fillText('▼', GUTTER - 10, H - 6);
 }
 
 // --- fx buttons
@@ -895,12 +1010,13 @@ function renderKeys() {
   els.keys.classList.toggle('hidden', write);
   els.wgrid.classList.toggle('hidden', !write);
   if (write) return renderWrite();
-  const dev = curDev(), di = ui.dev, pat = curPat(), r = rt[di];
+  const dev = curDev(), di = ui.dev, pat = curPat(), r = rt[di], chord = isSynth(di) ? guideChord(dev) : null;
   keyEls.forEach((b, k) => {
     let cls = 'key', lbl = '';
     if (ui.mode === 'play') {
       lbl = trackName(di, k);
       if (k === dev.sel) cls += ' sel';
+      if (chord) { const ci = chord.pcs.indexOf(noteFor(dev, k) % 12); if (ci >= 0) cls += ci ? ' ctone' : ' ctone croot'; }
       if (ui.playing && ui.playStep >= 0 && stepOn(pat, k, ui.playStep)) cls += ' trig';
     } else {
       lbl = 'P' + pad2(k + 1);
@@ -915,30 +1031,23 @@ function renderKeys() {
 }
 
 function renderWrite() {
-  const dev = curDev(), di = ui.dev, pat = curPat(), synth = isSynth(di), cursor = rt[di].cursor;
+  const dev = curDev(), di = ui.dev, pat = curPat(), synth = isSynth(di);
+  const wasHidden = els.roll.classList.contains('hidden');
+  els.wgrid.classList.toggle('roll-mode', synth);
+  els.roll.classList.toggle('hidden', !synth);
+  if (synth) { if (wasHidden || !els.roll.width) sizeRoll(); drawRoll(); return; }
   stepEls.forEach((b, s) => {
-    let cls = 'wkey step', lbl = '';
+    let cls = 'wkey step';
     if (s % 4 === 0) cls += ' beat';
     if (s === ui.playStep) cls += ' ph';
-    if (synth) {
-      const ks = stepTracks(pat, s);
-      if (ks.length) { cls += ' on'; lbl = trackName(di, ks[0]) + (ks.length > 1 ? '+' : ''); }
-      if (s === cursor) cls += ' cursor';
-    } else if (stepOn(pat, dev.sel, s)) cls += ' on';
+    if (stepOn(pat, dev.sel, s)) cls += ' on';
     else if (stepTracks(pat, s).length) cls += ' any';
-    setCls(b, cls); setLbl(b, lbl);
+    setCls(b, cls); setLbl(b, '');
   });
-  const atCursor = synth ? stepTracks(pat, cursor) : [];
-  noteEls.forEach((b, i) => {
-    const k = noteTrackAt(i);
+  noteEls.forEach((b, k) => {
     let cls = 'wkey note';
-    if (synth) {
-      if (atCursor.includes(k)) cls += ' on';
-      if (k % SCALES[dev.scale].length === 0) cls += ' root';
-    } else {
-      if (k === dev.sel) cls += ' on';
-      else if (pat.g[k]) cls += ' has';
-    }
+    if (k === dev.sel) cls += ' on';
+    else if (pat.g[k]) cls += ' has';
     if (ui.playing && ui.playStep >= 0 && stepOn(pat, k, ui.playStep)) cls += ' trig';
     setCls(b, cls); setLbl(b, trackName(di, k));
   });
@@ -954,10 +1063,10 @@ function renderScreen() {
   els.scrInfo.textContent = info;
   els.scrMode.textContent = ui.mode.toUpperCase() + (ui.rec ? ' ● REC' : '');
   els.scrMode.classList.toggle('rec', ui.rec);
-  if (ui.mode === 'write' && isSynth(ui.dev)) {
-    const ks = stepTracks(curPat(), r.cursor);
-    els.scrSel.textContent = `STEP ${pad2(r.cursor + 1)} ${ks.length ? ks.map(k => trackName(ui.dev, k)).join(' ') : '—'}`;
-  } else els.scrSel.textContent = `${def.selLabel} ${pad2(dev.sel + 1)} ${trackName(ui.dev, dev.sel)}`;
+  const chord = isSynth(ui.dev) ? guideChord(dev) : null;
+  if (chord) els.scrSel.textContent = `CHORD ${chord.name}`;
+  else if (ui.mode === 'write' && isSynth(ui.dev)) els.scrSel.textContent = 'TAP · DRAG TO PAINT';
+  else els.scrSel.textContent = `${def.selLabel} ${pad2(dev.sel + 1)} ${trackName(ui.dev, dev.sel)}`;
 }
 
 function renderButtons() {
@@ -987,10 +1096,6 @@ function drawMatrix() {
   g.clearRect(0, 0, W, H);
   g.fillStyle = 'rgba(255,255,255,.045)';
   g.fillRect(0, (15 - dev.sel) * rh, W, rh);
-  if (ui.mode === 'write' && isSynth(ui.dev)) {
-    g.strokeStyle = col; g.lineWidth = Math.max(1, W / 400);
-    g.strokeRect(rt[ui.dev].cursor * cw + 1, 1, cw - 2, H - 2);
-  }
   if (ui.playStep >= 0) { g.fillStyle = 'rgba(255,255,255,.09)'; g.fillRect(ui.playStep * cw, 0, cw, H); }
   const w = Math.max(2, cw * .62), h = Math.max(2, rh * .62);
   const dpr = window.devicePixelRatio || 1;
@@ -1084,12 +1189,19 @@ function buildSheet() {
   b.append(slider('Pump', 0, 100, 1, Math.round(st.pump * 100), v => v + '%', v => { st.pump = v / 100; save(); }));
   b.append(h('p', { class: 'note' }, 'Pump = sidechain: bass and lead duck every time a kick hits.'));
 
+  b.append(h('h3', {}, 'Chord guide'));
+  const gdev = st.devices[ui.dev === 1 ? 1 : 2];
+  b.append(select('Progression', [[-1, 'Off'], ...PROGS.map((_, i) => [i, progName(gdev, i)])], st.guide.on ? st.guide.prog : -1, v => {
+    v = +v; st.guide.on = v >= 0; if (v >= 0) st.guide.prog = v; save(); renderAll();
+  }));
+  b.append(h('p', { class: 'note' }, 'Hints only: chord notes get a soft highlight, every note in key still works. Pattern 1 follows chord 1, P2 chord 2… chain P1–P4 to play the progression. GUIDE in write mode turns it on and off.'));
+
   b.append(h('h3', {}, 'Mixer'));
   st.devices.forEach((d, i) => {
     const mute = button(d.mute ? 'Muted' : 'Mute', () => {
       d.mute = !d.mute; mute.textContent = d.mute ? 'Muted' : 'Mute'; mute.classList.toggle('on', d.mute); renderAll(); save();
     }, 'small toggle' + (d.mute ? ' on' : ''));
-    const row = slider(DEFS[i].name, 0, 100, 1, Math.round(d.vol * 100), v => String(v), v => {
+    const row = slider(DEFS[i].name, 0, 150, 1, Math.round(d.vol * 100), v => String(v), v => {
       d.vol = v / 100; if (A) A.buses[i].gain.setTargetAtTime(d.vol, ctx.currentTime, .02); save();
     });
     row.append(mute); b.append(row);
@@ -1136,7 +1248,8 @@ function buildSheet() {
   help.innerHTML = `
     <p><b>Play mode</b> (no mode lit): tap keys to play live. <b>REC</b> + ▶ records what you tap onto the nearest step.</p>
     <p><b>WRITE · drums</b>: tap a sound in the bottom half, then tap steps in the top half to toggle it. A dim dot means another sound is on that step.</p>
-    <p><b>WRITE · bass/lead</b>: the outlined step is the cursor. Tap a note and it's written there, then the cursor moves on. Play a melody in order. <b>REST</b> leaves a gap. Tap a step to jump the cursor; double-tap it to clear. On LEAD, hold a note and tap others to enter a chord.</p>
+    <p><b>WRITE · bass/lead</b>: a piano roll. Steps run left to right, notes low to high. Tap a cell to add or remove a note, drag to paint a run or erase. Drag the note names up or down to see more notes, tap a name to hear it. LEAD can stack notes on one step for chords; BASS keeps one note per step.</p>
+    <p><b>GUIDE</b> (write mode, bass/lead): lights up the notes of the suggested chord for this pattern. Pick a progression in the menu.</p>
     <p><b>PATTERN</b>: tap to switch (at end of bar while playing). Hold one and tap others to chain. <b>COPY</b>, then tap a slot, duplicates the current pattern.</p>
     <p><b>Demo patterns</b>: DRUM P1 techno · P2 house · P3 new wave · P4 tom fill. BASS P1 rolling · P2 octave pulse · P3 acid. Mix and match.</p>
     <p><b>FX</b>: hold. LOW/HIGH sweep slowly while held (build-ups), PHAS = jet phaser, R×4/2/1 = beat repeat.</p>
@@ -1232,7 +1345,7 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('touchend', resumeAudio, { passive: true });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeAudio(); });
 window.addEventListener('pagehide', () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch (e) {} });
-window.addEventListener('resize', () => { sizeMatrix(); drawMatrix(); });
+window.addEventListener('resize', () => { sizeMatrix(); drawMatrix(); if (!els.roll.classList.contains('hidden')) { sizeRoll(); drawRoll(); } });
 
 const splash = $('#splash');
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

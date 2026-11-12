@@ -352,6 +352,14 @@ button {
 .wkey.note.trig { box-shadow: inset 0 0 0 2px var(--accent); }
 .wkey.note.on.trig { box-shadow: inset 0 0 0 2px #fff; }
 
+/* piano roll (bass + lead write mode) */
+.roll { flex: 1 1 auto; width: 100%; min-height: 0; display: block; touch-action: none; background: rgba(6, 3, 6, .7); box-shadow: inset 0 0 0 1px rgba(255, 70, 85, .28); }
+.roll.hidden, .wgrid.roll-mode .wsteps, .wgrid.roll-mode .wnotes { display: none; }
+
+/* chord guide marks on the play keys */
+.key.ctone .lbl { color: var(--accent); }
+.key.croot { background: linear-gradient(var(--accent), var(--accent)) 0 100% / 100% 3px no-repeat, rgba(14, 6, 10, .8); }
+
 /* ---------- fx ---------- */
 .fx-wrap { margin-top: 2px; }
 .fxrow { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
