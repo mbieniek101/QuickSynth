@@ -27,7 +27,9 @@ const PROGS = [
   { deg: [0, 2, 6, 5] }, { deg: [0, 3] }, { deg: [0, 5] }, { deg: [0] },
 ];
 const BASS_WAVES = ['sawtooth', 'square', 'triangle', 'sine'], BASS_WL = ['SAW', 'SQR', 'TRI', 'SIN'];
-const LEAD_WAVES = ['sawtooth', 'square', 'super', 'triangle'], LEAD_WL = ['SAW', 'SQR', 'SUPER', 'TRI'];
+const LEAD_WAVES = ['sawtooth', 'square', 'super', 'triangle', 'fuzz', 'talk'], LEAD_WL = ['SAW', 'SQR', 'SUPER', 'TRI', 'FUZZ', 'TALK'];
+const idx6 = v => Math.min(5, Math.floor(v * 6));
+const w6 = i => (i + .5) / 6; // knob value at the middle of lead wave i
 const CHORDS = ['OFF', 'OCT', '5TH', 'TRIAD', '7TH'];
 const idx4 = v => Math.min(3, Math.floor(v * 4));
 const chordIdx = v => Math.min(4, Math.floor(v * 5));
@@ -54,13 +56,14 @@ const DEFS = [
     { k: 'drive', label: 'DRIVE', def: .35 },
   ] },
   { id: 'lead', name: 'LEAD', color: '#ff2bd6', selLabel: 'NOTE', knobs: [
-    { k: 'wave', label: 'WAVE', def: .6, fmt: v => LEAD_WL[idx4(v)] },
+    { k: 'wave', label: 'WAVE', def: w6(2), fmt: v => LEAD_WL[idx6(v)] },
     { k: 'cutoff', label: 'CUTOFF', def: .7 },
     { k: 'attack', label: 'ATTACK', def: 0 },
     { k: 'release', label: 'RELEASE', def: .25 },
     { k: 'detune', label: 'DETUNE', def: .6 },
     { k: 'chord', label: 'CHORD', def: .7, fmt: v => CHORDS[chordIdx(v)] },
     { k: 'gate', label: 'GATE', def: .35, fmt: v => v > .92 ? 'TIE' : pct(v) },
+    { k: 'drive', label: 'DRIVE', def: .15 },
   ] },
 ];
 
@@ -74,12 +77,19 @@ const PRESETS = {
     'Deep sub': { wave: .9, cutoff: .5, reso: 0, env: 0, decay: .5, glide: 0, drive: .15 },
   },
   2: {
-    'Supersaw stab': { wave: .6, cutoff: .7, attack: 0, release: .25, detune: .6, chord: .7, gate: .35 },
-    'Robot filter': { wave: 0, cutoff: .45, attack: 0, release: .2, detune: .2, chord: .3, gate: .5 },
-    'Goth pad': { wave: .6, cutoff: .42, attack: .55, release: .65, detune: .5, chord: .7, gate: 1 },
-    'Cold lead': { wave: .3, cutoff: .55, attack: .08, release: .4, detune: .3, chord: 0, gate: .7 },
-    'Pluck': { wave: 0, cutoff: .5, attack: 0, release: .15, detune: .15, chord: .5, gate: .2 },
-    'Organ chords': { wave: .3, cutoff: .6, attack: .02, release: .2, detune: .1, chord: .9, gate: .8 },
+    'Robot rock (fuzz riff)': { wave: w6(4), cutoff: .55, attack: 0, release: .18, detune: .25, chord: .3, gate: .55, drive: .85 },
+    'Punk fifths': { wave: w6(4), cutoff: .62, attack: 0, release: .15, detune: .35, chord: .5, gate: .45, drive: 1 },
+    'Gritty saw': { wave: w6(0), cutoff: .58, attack: 0, release: .22, detune: .35, chord: 0, gate: .6, drive: .7 },
+    'Talk box': { wave: w6(5), cutoff: .5, attack: .04, release: .25, detune: .2, chord: 0, gate: .75, drive: .45 },
+    'Talk box chords': { wave: w6(5), cutoff: .6, attack: .02, release: .3, detune: .25, chord: .7, gate: .5, drive: .35 },
+    'Dirty stab': { wave: w6(2), cutoff: .6, attack: 0, release: .2, detune: .5, chord: .7, gate: .3, drive: .7 },
+    'Square grit (chiptune punk)': { wave: w6(1), cutoff: .7, attack: 0, release: .12, detune: .08, chord: .3, gate: .4, drive: .6 },
+    'Supersaw stab': { wave: w6(2), cutoff: .7, attack: 0, release: .25, detune: .6, chord: .7, gate: .35, drive: .15 },
+    'Robot filter': { wave: w6(0), cutoff: .45, attack: 0, release: .2, detune: .2, chord: .3, gate: .5, drive: .2 },
+    'Goth pad': { wave: w6(2), cutoff: .42, attack: .55, release: .65, detune: .5, chord: .7, gate: 1, drive: 0 },
+    'Cold lead': { wave: w6(1), cutoff: .55, attack: .08, release: .4, detune: .3, chord: 0, gate: .7, drive: .1 },
+    'Pluck': { wave: w6(0), cutoff: .5, attack: 0, release: .15, detune: .15, chord: .5, gate: .2, drive: .1 },
+    'Organ chords': { wave: w6(1), cutoff: .6, attack: .02, release: .2, detune: .1, chord: .9, gate: .8, drive: 0 },
   },
 };
 
@@ -98,7 +108,7 @@ const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
 
 function defaultState() {
   const s = {
-    v: 2, bpm: 124, swing: 0, pump: .45, guide: { on: false, prog: 0 },
+    v: 2, leadWaves6: 1, bpm: 124, swing: 0, pump: .45, guide: { on: false, prog: 0 },
     devices: DEFS.map((d, i) => ({
       cur: 0, chain: [0], sel: 0,
       patterns: Array.from({ length: NPAT }, newPattern),
@@ -156,7 +166,9 @@ function sanitize(s) {
       if (!Array.isArray(dev.params) || dev.params.length !== 16) dev.params = base.params;
       dev.params = dev.params.map(p => ({ ...defaults(def), ...p }));
     } else dev.params = { ...defaults(def), ...dev.params };
+    if (i === 2 && !s.leadWaves6) dev.params.wave = w6(idx4(dev.params.wave)); // old knob had 4 waves
   });
+  s.leadWaves6 = 1;
   return s;
 }
 
@@ -483,23 +495,54 @@ function bassVoice(midi, t, dur, p, bus) {
   return r => stopAll(release(r));
 }
 
+// talk box formants (Hz): the TALK wave opens from "oh" to "ah" on every note
+const VOWEL_O = [450, 800, 2830], VOWEL_A = [800, 1150, 2900];
 function leadVoice(midi, t, dur, p, bus, nVoices = 1) {
-  const f = mtof(midi), type = LEAD_WAVES[idx4(p.wave)];
+  const f = mtof(midi), type = LEAD_WAVES[idx6(p.wave)];
   const att = .002 + p.attack * p.attack * 1.5, rel = .03 + p.release * p.release * 2.5;
-  const fl = ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.Q.value = 2;
-  const base = 200 * 2 ** (p.cutoff * 6.4);
-  fl.frequency.setValueAtTime(Math.min(18000, base * 2.2), t);
-  fl.frequency.exponentialRampToValueAtTime(base, t + .25);
-  const g = ctx.createGain(); fl.connect(g); g.connect(bus);
-  let detunes, oscType;
-  if (type === 'super') { const w = 8 + p.detune * 40; detunes = [-1, -.5, 0, .5, 1].map(x => x * w); oscType = 'sawtooth'; }
-  else { detunes = [-p.detune * 28, p.detune * 28]; oscType = type; }
-  const oscs = detunes.map(c => {
-    const o = ctx.createOscillator(); o.type = oscType; o.frequency.value = f; o.detune.value = c;
-    o.connect(fl); o.start(t); return o;
-  });
-  // detuned oscillators sum incoherently, so normalise by sqrt(n) rather than n (n made SUPER ~14 dB too quiet)
-  const peak = (oscType === 'triangle' ? .5 : .42 / Math.sqrt(oscs.length)) / Math.sqrt(nVoices);
+  const g = ctx.createGain();
+  // DRIVE: distortion after the filter, with level compensation so turning it up adds grit, not just volume
+  const di = Math.round(p.drive * 5), fuzz = type === 'fuzz';
+  const dIdx = Math.min(5, di + (fuzz ? 2 : 0));
+  const nOsc = type === 'super' ? 5 : 2;
+  const pre = ctx.createGain(); pre.gain.value = .6 / Math.sqrt(nOsc); // sets how hard the drive is hit
+  if (dIdx > 0) { const sh = shaper(A.driveCurves[dIdx], g); sh.oversample = '2x'; pre.connect(sh); } else pre.connect(g);
+  const post = pre;
+  const fl = ctx.createBiquadFilter(); fl.type = 'lowpass';
+  const base = 200 * 2 ** (p.cutoff * 6.4), sweep = .2 + p.attack * .5;
+  const oscs = [];
+  const addOsc = (oscType, freq, cents, dest, lvl = 1) => {
+    const o = ctx.createOscillator(); o.type = oscType; o.frequency.value = freq; o.detune.value = cents;
+    if (lvl !== 1) { const og = ctx.createGain(); og.gain.value = lvl; o.connect(og); og.connect(dest); } else o.connect(dest);
+    o.start(t); oscs.push(o);
+  };
+  if (type === 'talk') {
+    // saws through three moving formant band-passes, roughly a talk box / vocoder robot voice
+    const sum = ctx.createGain(); sum.gain.value = 2.4; sum.connect(post);
+    const src = ctx.createGain();
+    const shift = 2 ** ((p.cutoff - .5) * 1.2);
+    VOWEL_O.forEach((fo, i) => {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 7 - i * 1.5;
+      bp.frequency.setValueAtTime(fo * shift, t);
+      bp.frequency.exponentialRampToValueAtTime(VOWEL_A[i] * shift, t + .09 + sweep * .4);
+      const bg = ctx.createGain(); bg.gain.value = [1, .7, .35][i];
+      src.connect(bp); bp.connect(bg); bg.connect(sum);
+    });
+    [-1, 1].forEach(x => addOsc('sawtooth', f, x * (4 + p.detune * 18), src));
+  } else {
+    fl.Q.value = fuzz ? 5 : 2 + p.drive * 3;
+    fl.frequency.setValueAtTime(Math.min(18000, base * (fuzz ? 3.5 : 2.2)), t);
+    fl.frequency.exponentialRampToValueAtTime(base, t + sweep);
+    fl.connect(post);
+    if (type === 'super') { const w = 8 + p.detune * 40; [-1, -.5, 0, .5, 1].forEach(x => addOsc('sawtooth', f, x * w, fl)); }
+    else if (fuzz) { // detuned saws + square an octave down: a distorted-guitar style riff sound
+      [-1, 1].forEach(x => addOsc('sawtooth', f, x * (6 + p.detune * 22), fl));
+      addOsc('square', f / 2, 0, fl, .7);
+    } else [-1, 1].forEach(x => addOsc(type, f, x * p.detune * 28, fl));
+  }
+  g.connect(bus);
+  // detuned oscillators sum incoherently, so normalise by sqrt(n) rather than n; drive adds its own gain
+  const peak = (type === 'triangle' ? .83 : .7) / Math.sqrt(nVoices) / (1 + dIdx * .3);
   const release = envAR(g.gain, t, peak, att, dur, rel);
   const stopAll = end => { oscs.forEach(o => o.stop(end)); setTimeout(() => g.disconnect(), (end - ctx.currentTime + .2) * 1000); };
   if (dur != null) { stopAll(t + dur + rel * 1.3 + .05); return null; }
@@ -1262,6 +1305,7 @@ function buildSheet() {
     <p><b>PATTERN</b>: tap to switch (at end of bar while playing). Hold one and tap others to chain. <b>COPY</b>, then tap a slot, duplicates the current pattern.</p>
     <p><b>Demo patterns</b>: DRUM P1 techno · P2 house · P3 new wave · P4 tom fill. BASS P1 rolling · P2 octave pulse · P3 acid. Mix and match.</p>
     <p><b>FX</b>: hold. LOW/HIGH sweep slowly while held (build-ups), PHAS = jet phaser, R×4/2/1 = beat repeat.</p>
+    <p><b>LEAD WAVE</b>: SAW, SQR, SUPER, TRI, FUZZ (distorted riff sound with a sub octave), TALK (talk-box robot voice). <b>DRIVE</b> adds grit without just getting louder. Try the Robot rock, Punk fifths and Talk box presets.</p>
     <p><b>LEAD CHORD</b> knob turns one key into octaves, fifths, triads or 7ths in key. GATE all the way up = <b>TIE</b> for pads.</p>
     <p><b>Knobs</b>: drag up/down, double-tap to reset. Tap the active tab to mute it.</p>`;
   b.append(help);
@@ -1362,6 +1406,17 @@ window.addEventListener('resize', () => { sizeMatrix(); drawMatrix(); if (!els.r
 const splash = $('#splash');
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+// iOS home-screen apps can get a layout viewport shorter than the screen (status-bar height missing),
+// which leaves an unpainted black strip at the bottom. Stretch the page to the real screen height.
+function fitScreen() {
+  const portrait = innerHeight > innerWidth;
+  document.documentElement.style.setProperty('--vh-gap', '0px');
+  const vh = Math.min(innerHeight, document.documentElement.clientHeight);
+  const gap = isIOS && standalone && portrait ? clamp(screen.height - vh, 0, 80) : 0;
+  document.documentElement.style.setProperty('--vh-gap', gap + 'px');
+}
+fitScreen();
+window.addEventListener('resize', fitScreen);
 if (isIOS && !standalone) $('#installHint').textContent = 'Tip: tap Share → "Add to Home Screen" to install QuickSynth as a full-screen app.';
 splash.addEventListener('click', () => { initAudio(); splash.classList.add('hidden'); });
 
