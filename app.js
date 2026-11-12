@@ -542,7 +542,7 @@ function leadVoice(midi, t, dur, p, bus, nVoices = 1) {
   }
   g.connect(bus);
   // detuned oscillators sum incoherently, so normalise by sqrt(n) rather than n; drive adds its own gain
-  const peak = (type === 'triangle' ? .83 : .7) / Math.sqrt(nVoices) / (1 + dIdx * .3);
+  const peak = (type === 'triangle' ? .66 : .56) / Math.sqrt(nVoices) / (1 + dIdx * .3); // 20% below the first loudness fix
   const release = envAR(g.gain, t, peak, att, dur, rel);
   const stopAll = end => { oscs.forEach(o => o.stop(end)); setTimeout(() => g.disconnect(), (end - ctx.currentTime + .2) * 1000); };
   if (dur != null) { stopAll(t + dur + rel * 1.3 + .05); return null; }
