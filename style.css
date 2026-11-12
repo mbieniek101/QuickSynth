@@ -135,7 +135,7 @@ button {
   flex-direction: column;
   gap: 8px;
   height: 100vh;
-  height: calc(100dvh + var(--vh-gap, 0px));
+  height: 100dvh; /* the controls always fit the visible screen; html's background covers any leftover strip */
   max-width: 500px;
   margin: 0 auto;
   /* bottom: only clear the home-indicator line, so the controls use the space Safari's URL bar had */
